@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Sketch From Image — Upload & Draw</title>
+<style>
+  :root{--bg:#0b0d12;--fg:#e8ecf1;--muted:#94a3b8;--card:#131722;--accent:#60a5fa}
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);
+            font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
+  .wrap{max-width:1100px;margin:0 auto;padding:22px}
+  h1{font-size:20px;margin:0 0 12px}
+  .panel{display:grid;gap:12px;background:var(--card);padding:14px 16px;border-radius:12px;
+         box-shadow:0 10px 30px rgba(0,0,0,.35)}
+  .row{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+  label{color:var(--muted)}
+  input[type="number"], input[type="range"]{
+    background:#0f1420;border:1px solid #233044;color:var(--fg);padding:6px 10px;border-radius:10px
+  }
+  input[type="file"]{accent-color:var(--accent)}
+  select{background:#0f1420;border:1px solid #233044;color:var(--fg);padding:6px 10px;border-radius:10px}
+  button{background:linear-gradient(180deg,#3b82f6,#2563eb);color:#fff;border:none;border-radius:10px;
+         padding:8px 14px;font-weight:600;cursor:pointer}
+  button:disabled{opacity:.55;cursor:not-allowed}
+  .hint{color:var(--muted);font-size:12px}
+  .area{margin-top:16px;display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start}
+  canvas{background:#fff;border-radius:12px;box-shadow:0 6px 24px rgba(0,0,0,.35);max-width:100%}
+  pre{background:#0f1420;border:1px solid #233044;border-radius:10px;padding:10px;min-height:100px;white-space:pre-wrap}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Sketch From Image — Upload & Draw</h1>
+
+  <div class="panel">
+    <div class="row">
+      <label><b>Chọn ảnh:</b></label>
+      <input id="file" type="file" accept="image/*">
+      <label><b>Rộng xuất (px):</b></label>
+      <input id="outW" type="number" min="300" max="2400" value="1000">
+      <label><b>Kiểu:</b></label>
+      <select id="mode">
+        <option value="pencil">Pencil (mềm, giống vẽ chì)</option>
+        <option value="edge">Edge (nét phác thảo)</option>
+      </select>
+      <button id="renderBtn" disabled>Render</button>
+      <button id="dlBtn" disabled>Tải PNG</button>
+    </div>
+
+    <div class="row" id="controls">
+      <label><b>Độ mờ (blur):</b> <span id="blurVal">8</span></label>
+      <input id="blur" type="range" min="1" max="30" value="8">
+      <label><b>Độ tương phản nét:</b> <span id="edgeVal">1.3</span></label>
+      <input id="edge" type="range" min="0.5" max="3" step="0.1" value="1.3">
+    </div>
+
+    <div class="row hint">
+      Pencil: tăng blur → nét mềm kiểu chì. │ Edge: tăng “Độ tương phản nét” → đường mạnh, giảm để mảnh.
+    </div>
+  </div>
+
+  <div class="area">
+    <div style="min-width:280px;flex:1">
+      <div class="hint">Trạng thái</div>
+      <pre id="log"></pre>
+    </div>
+    <canvas id="cv"></canvas>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const log = (...a)=>{ $('log').textContent = a.join(' ') + "\n" + $('log').textContent; }
+
+let bmp = null;
+$('file').onchange = async () => {
+  const f = $('file').files[0];
+  if (!f) return;
+  bmp = await createImageBitmap(f);
+  log("Đã nạp:", f.name, `${bmp.width}×${bmp.height}`);
+  $('renderBtn').disabled = false;
+};
+
+$('blur').oninput = () => $('blurVal').textContent = $('blur').value;
+$('edge').oninput = () => $('edgeVal').textContent = $('edge').value;
+
+$('renderBtn').onclick = () => renderSketch();
+$('dlBtn').onclick    = () => {
+  const a = document.createElement('a');
+  a.href = $('cv').toDataURL('image/png');
+  a.download = 'sketch.png';
+  a.click();
+};
+
+function renderSketch(){
+  if(!bmp){ log("Chưa có ảnh."); return; }
+  const mode = $('mode').value;
+  const outW = Math.max(300, parseInt($('outW').value||1000));
+  const ratio = outW / bmp.width;
+  const w = outW, h = Math.round(bmp.height * ratio);
+
+  const cv = $('cv'); const ctx = cv.getContext('2d', {willReadFrequently:true});
+  cv.width = w; cv.height = h;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(bmp, 0, 0, w, h);
+
+  const src = ctx.getImageData(0,0,w,h);
+
+  if (mode === 'pencil') {
+    const blurR = parseInt($('blur').value||8);
+    const gray = toGray(src);
+    const inv  = invert(gray);
+    const blur = boxBlur(inv, w, h, blurR);
+    const dodge = colorDodge(blur, gray); // classic pencil effect
+    ctx.putImageData(dodge, 0, 0);
+  } else {
+    const strength = parseFloat($('edge').value||1.3);
+    const gray = toGray(src);
+    const edges = sobel(gray, w, h, strength);
+    ctx.putImageData(edges, 0, 0);
+  }
+
+  $('dlBtn').disabled = false;
+  log("Render xong:", w+"×"+h, "-", mode.toUpperCase());
+}
+
+// ---------- Image ops ----------
+function toGray(img){
+  const d = img.data, g = new ImageData(img.width, img.height);
+  const o = g.data;
+  for(let i=0;i<d.length;i+=4){
+    const y = 0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
+    o[i]=o[i+1]=o[i+2]=y; o[i+3]=255;
+  }
+  return g;
+}
+function invert(img){
+  const d = img.data; const out = new ImageData(img.width, img.height);
+  const o = out.data;
+  for(let i=0;i<d.length;i+=4){
+    o[i]=255-d[i]; o[i+1]=255-d[i+1]; o[i+2]=255-d[i+2]; o[i+3]=255;
+  }
+  return out;
+}
+// Simple fast box blur (radius r)
+function boxBlur(img,w,h,r){
+  r = Math.max(1, r|0);
+  const out = new ImageData(w,h), d=img.data, o=out.data;
+  // horizontal
+  let tmp = new Uint8ClampedArray(w*h);
+  for(let y=0;y<h;y++){
+    let sum=0;
+    for(let x=-r;x<=r;x++){ sum += d[4*(y*w+clamp(x,0,w-1))]; }
+    for(let x=0;x<w;x++){
+      tmp[y*w+x] = sum/(2*r+1);
+      const x1 = clamp(x-r,0,w-1), x2 = clamp(x+r+1,0,w-1);
+      sum += d[4*(y*w+x2)] - d[4*(y*w+x1)];
+    }
+  }
+  // vertical
+  for(let x=0;x<w;x++){
+    let sum=0;
+    for(let y=-r;y<=r;y++){ sum += tmp[clamp(y,0,h-1)*w + x]; }
+    for(let y=0;y<h;y++){
+      const val = sum/(2*r+1);
+      const idx = 4*(y*w+x);
+      o[idx]=o[idx+1]=o[idx+2]=val; o[idx+3]=255;
+      const y1 = clamp(y-r,0,h-1), y2 = clamp(y+r+1,0,h-1);
+      sum += tmp[y2*w + x] - tmp[y1*w + x];
+    }
+  }
+  return out;
+}
+// Color dodge: result = base / (255 - blend) * 255
+function colorDodge(blur, gray){
+  const b=blur.data, g=gray.data, out=new ImageData(gray.width, gray.height), o=out.data;
+  for(let i=0;i<b.length;i+=4){
+    const denom = 255 - b[i];
+    const v = denom <= 1 ? 255 : Math.min(255, (g[i] * 255) / denom);
+    o[i]=o[i+1]=o[i+2]=v; o[i+3]=255;
+  }
+  return out;
+}
+// Sobel edge + invert to get sketchy black lines on white
+function sobel(gray,w,h,str=1.3){
+  const d=gray.data, out=new ImageData(w,h), o=out.data;
+  const get=(x,y)=> d[4*(y*w+x)];
+  const clampXY=(x,y)=>[Math.max(0,Math.min(w-1,x)), Math.max(0,Math.min(h-1,y))];
+  for(let y=0;y<h;y++){
+    for(let x=0;x<w;x++){
+      let gx=0, gy=0;
+      for(let j=-1;j<=1;j++){
+        for(let i=-1;i<=1;i++){
+          const [xx,yy]=clampXY(x+i,y+j);
+          const kx=[[-1,0,1],[-2,0,2],[-1,0,1]][j+1][i+1];
+          const ky=[[-1,-2,-1],[0,0,0],[1,2,1]][j+1][i+1];
+          const v=get(xx,yy);
+          gx+=kx*v; gy+=ky*v;
+        }
+      }
+      let mag = Math.hypot(gx,gy)*str/255;
+      let v = Math.max(0, Math.min(255, 255 - mag)); // invert for dark lines
+      const idx=4*(y*w+x);
+      o[idx]=o[idx+1]=o[idx+2]=v; o[idx+3]=255;
+    }
+  }
+  return out;
+}
+const clamp=(v,lo,hi)=> v<lo?lo:v>hi?hi:v;
+</script>
+</body>
+</html>
