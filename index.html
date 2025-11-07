@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Sketch From Image — Nét đen nền trắng</title>
+<title>Sketch From Image — Có màu & nét đen</title>
 <style>
   :root{--bg:#0b0d12;--fg:#e8ecf1;--muted:#94a3b8;--card:#131722;--accent:#60a5fa}
   html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);
@@ -30,7 +30,7 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>Sketch From Image — Nét đen trên nền trắng</h1>
+  <h1>Sketch From Image — Pencil / Edge / Colored</h1>
 
   <div class="panel">
     <div class="row">
@@ -41,7 +41,8 @@
       <label><b>Kiểu:</b></label>
       <select id="mode">
         <option value="pencil">Pencil (vẽ chì)</option>
-        <option value="edge">Edge (nét phác thảo đen)</option>
+        <option value="edge">Edge (nét đen)</option>
+        <option value="colorEdge">Colored Edge (phác họa có màu)</option>
       </select>
       <button id="renderBtn" disabled>Render</button>
       <button id="dlBtn" disabled>Tải PNG</button>
@@ -55,7 +56,7 @@
     </div>
 
     <div class="row hint">
-      Pencil: tăng blur → mềm kiểu chì. │ Edge: tăng “Độ tương phản nét” → đường đậm hơn, giảm → nét mảnh.
+      Pencil: mềm trắng đen │ Edge: nét đen │ Colored Edge: có màu gốc nhẹ, giữ đường nét.
     </div>
   </div>
 
@@ -103,7 +104,6 @@ function renderSketch(){
   cv.width = w; cv.height = h;
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(bmp, 0, 0, w, h);
-
   const src = ctx.getImageData(0,0,w,h);
 
   if (mode === 'pencil') {
@@ -113,11 +113,17 @@ function renderSketch(){
     const blur = boxBlur(inv, w, h, blurR);
     const dodge = colorDodge(blur, gray);
     ctx.putImageData(dodge, 0, 0);
-  } else {
+  } 
+  else if (mode === 'edge') {
     const strength = parseFloat($('edge').value||1.3);
     const gray = toGray(src);
     const edges = sobelBlack(gray, w, h, strength);
     ctx.putImageData(edges, 0, 0);
+  }
+  else if (mode === 'colorEdge') {
+    const strength = parseFloat($('edge').value||1.3);
+    const colorEdges = sobelColor(src, w, h, strength);
+    ctx.putImageData(colorEdges, 0, 0);
   }
 
   $('dlBtn').disabled = false;
@@ -178,7 +184,7 @@ function colorDodge(blur, gray){
   return out;
 }
 
-// ----------- Sobel (Nét đen) -----------
+// ----------- Sobel (đen trắng) -----------
 function sobelBlack(gray,w,h,str=1.3){
   const d=gray.data, out=new ImageData(w,h), o=out.data;
   const get=(x,y)=> d[4*(y*w+x)];
@@ -196,9 +202,33 @@ function sobelBlack(gray,w,h,str=1.3){
         }
       }
       const mag = Math.hypot(gx,gy)*str/255;
-      const edge = 255 - Math.min(255, mag*255); // đảo ngược: trắng nền, đen nét
+      const edge = 255 - Math.min(255, mag*255);
       const idx=4*(y*w+x);
       o[idx]=o[idx+1]=o[idx+2]=edge; o[idx+3]=255;
+    }
+  }
+  return out;
+}
+
+// ----------- Sobel có màu -----------
+function sobelColor(src,w,h,str=1.3){
+  const d=src.data, out=new ImageData(w,h), o=out.data;
+  const get=(x,y,c)=> d[4*(y*w+x)+c];
+  const clampXY=(x,y)=>[Math.max(0,Math.min(w-1,x)), Math.max(0,Math.min(h-1,y))];
+  for(let y=0;y<h;y++){
+    for(let x=0;x<w;x++){
+      let gx=[0,0,0], gy=[0,0,0];
+      for(let j=-1;j<=1;j++){
+        for(let i=-1;i<=1;i++){
+          const [xx,yy]=clampXY(x+i,y+j);
+          const kx=[[-1,0,1],[-2,0,2],[-1,0,1]][j+1][i+1];
+          const ky=[[-1,-2,-1],[0,0,0],[1,2,1]][j+1][i+1];
+          for(let c=0;c<3;c++){ const v=get(xx,yy,c); gx[c]+=kx*v; gy[c]+=ky*v; }
+        }
+      }
+      const mag = [0,1,2].map(c=>255 - Math.min(255, Math.hypot(gx[c],gy[c])*str/255));
+      const idx=4*(y*w+x);
+      o[idx]=mag[0]; o[idx+1]=mag[1]; o[idx+2]=mag[2]; o[idx+3]=255;
     }
   }
   return out;
