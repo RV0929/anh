@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Sketch From Image — Upload & Draw</title>
+<title>Sketch From Image — Upload & Draw (Red Edge)</title>
 <style>
   :root{--bg:#0b0d12;--fg:#e8ecf1;--muted:#94a3b8;--card:#131722;--accent:#60a5fa}
   html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);
@@ -30,7 +30,7 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>Sketch From Image — Upload & Draw</h1>
+  <h1>Sketch From Image — Upload & Draw (Nét đỏ)</h1>
 
   <div class="panel">
     <div class="row">
@@ -40,8 +40,8 @@
       <input id="outW" type="number" min="300" max="2400" value="1000">
       <label><b>Kiểu:</b></label>
       <select id="mode">
-        <option value="pencil">Pencil (mềm, giống vẽ chì)</option>
-        <option value="edge">Edge (nét phác thảo)</option>
+        <option value="pencil">Pencil (vẽ chì)</option>
+        <option value="edge">Edge (nét phác thảo đỏ)</option>
       </select>
       <button id="renderBtn" disabled>Render</button>
       <button id="dlBtn" disabled>Tải PNG</button>
@@ -55,7 +55,7 @@
     </div>
 
     <div class="row hint">
-      Pencil: tăng blur → nét mềm kiểu chì. │ Edge: tăng “Độ tương phản nét” → đường mạnh, giảm để mảnh.
+      Pencil: tăng blur → mềm kiểu chì. │ Edge: tăng “Độ tương phản nét” → đường mạnh, giảm → mảnh.
     </div>
   </div>
 
@@ -70,7 +70,7 @@
 
 <script>
 const $ = id => document.getElementById(id);
-const log = (...a)=>{ $('log').textContent = a.join(' ') + "\n" + $('log').textContent; }
+const log = (...a)=>{ $('log').textContent = a.join(' ') + "\\n" + $('log').textContent; }
 
 let bmp = null;
 $('file').onchange = async () => {
@@ -111,12 +111,12 @@ function renderSketch(){
     const gray = toGray(src);
     const inv  = invert(gray);
     const blur = boxBlur(inv, w, h, blurR);
-    const dodge = colorDodge(blur, gray); // classic pencil effect
+    const dodge = colorDodge(blur, gray); // hiệu ứng chì
     ctx.putImageData(dodge, 0, 0);
   } else {
     const strength = parseFloat($('edge').value||1.3);
     const gray = toGray(src);
-    const edges = sobel(gray, w, h, strength);
+    const edges = sobelRed(gray, w, h, strength); // nét phác thảo đỏ
     ctx.putImageData(edges, 0, 0);
   }
 
@@ -124,7 +124,7 @@ function renderSketch(){
   log("Render xong:", w+"×"+h, "-", mode.toUpperCase());
 }
 
-// ---------- Image ops ----------
+// ---------- Bộ xử lý ảnh ----------
 function toGray(img){
   const d = img.data, g = new ImageData(img.width, img.height);
   const o = g.data;
@@ -142,11 +142,9 @@ function invert(img){
   }
   return out;
 }
-// Simple fast box blur (radius r)
 function boxBlur(img,w,h,r){
   r = Math.max(1, r|0);
   const out = new ImageData(w,h), d=img.data, o=out.data;
-  // horizontal
   let tmp = new Uint8ClampedArray(w*h);
   for(let y=0;y<h;y++){
     let sum=0;
@@ -157,7 +155,6 @@ function boxBlur(img,w,h,r){
       sum += d[4*(y*w+x2)] - d[4*(y*w+x1)];
     }
   }
-  // vertical
   for(let x=0;x<w;x++){
     let sum=0;
     for(let y=-r;y<=r;y++){ sum += tmp[clamp(y,0,h-1)*w + x]; }
@@ -171,7 +168,6 @@ function boxBlur(img,w,h,r){
   }
   return out;
 }
-// Color dodge: result = base / (255 - blend) * 255
 function colorDodge(blur, gray){
   const b=blur.data, g=gray.data, out=new ImageData(gray.width, gray.height), o=out.data;
   for(let i=0;i<b.length;i+=4){
@@ -181,8 +177,9 @@ function colorDodge(blur, gray){
   }
   return out;
 }
-// Sobel edge + invert to get sketchy black lines on white
-function sobel(gray,w,h,str=1.3){
+
+// ----------- Sobel (Nét đỏ) -----------
+function sobelRed(gray,w,h,str=1.3){
   const d=gray.data, out=new ImageData(w,h), o=out.data;
   const get=(x,y)=> d[4*(y*w+x)];
   const clampXY=(x,y)=>[Math.max(0,Math.min(w-1,x)), Math.max(0,Math.min(h-1,y))];
@@ -198,14 +195,18 @@ function sobel(gray,w,h,str=1.3){
           gx+=kx*v; gy+=ky*v;
         }
       }
-      let mag = Math.hypot(gx,gy)*str/255;
-      let v = Math.max(0, Math.min(255, 255 - mag)); // invert for dark lines
+      const mag = Math.hypot(gx,gy)*str/255;
+      const intensity = Math.max(0, Math.min(255, mag*255));
       const idx=4*(y*w+x);
-      o[idx]=o[idx+1]=o[idx+2]=v; o[idx+3]=255;
+      o[idx]=intensity;   // đỏ
+      o[idx+1]=0;         // xanh lá
+      o[idx+2]=0;         // xanh dương
+      o[idx+3]=255;
     }
   }
   return out;
 }
+
 const clamp=(v,lo,hi)=> v<lo?lo:v>hi?hi:v;
 </script>
 </body>
